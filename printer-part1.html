@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en" class="html" data-theme="dark"><head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <title>
+    
+      Sirius Hacking Part 1 - The Delta Row Compression
+    
+  </title>
+
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<meta name="generator" content="Jekyll v4.2.2" />
+<meta property="og:title" content="Sirius Hacking Part 1 - The Delta Row Compression" />
+<meta name="author" content="4g3v" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Foreword This series of posts describes obstacles and findings while reverse engineering the firmware of the HP OfficeJet Pro 8710/8715 and is based on research done by JSOF. My goal with this project is to eventually be able to run Doom on the device." />
+<meta property="og:description" content="Foreword This series of posts describes obstacles and findings while reverse engineering the firmware of the HP OfficeJet Pro 8710/8715 and is based on research done by JSOF. My goal with this project is to eventually be able to run Doom on the device." />
+<link rel="canonical" href="http://0.0.0.0:4000/printer-part1" />
+<meta property="og:url" content="http://0.0.0.0:4000/printer-part1" />
+<meta property="og:site_name" content="vegamay.li" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2022-12-06T00:00:00+01:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Sirius Hacking Part 1 - The Delta Row Compression" />
+<meta name="twitter:site" content="@4g3v_" />
+<meta name="twitter:creator" content="@4g3v" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"4g3v"},"dateModified":"2022-12-06T00:00:00+01:00","datePublished":"2022-12-06T00:00:00+01:00","description":"Foreword This series of posts describes obstacles and findings while reverse engineering the firmware of the HP OfficeJet Pro 8710/8715 and is based on research done by JSOF. My goal with this project is to eventually be able to run Doom on the device.","headline":"Sirius Hacking Part 1 - The Delta Row Compression","mainEntityOfPage":{"@type":"WebPage","@id":"http://0.0.0.0:4000/printer-part1"},"url":"http://0.0.0.0:4000/printer-part1"}</script>
+<!-- End Jekyll SEO tag -->
+
+  <link type="application/atom+xml" rel="alternate" href="http://0.0.0.0:4000/feed.xml" title="vegamay.li" />
+
+  <!-- Favicon -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/favicon/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/favicon/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/favicon/favicon-16x16.png">
+  <link rel="manifest" href="/assets/images/favicon/site.webmanifest">
+  <link rel="mask-icon" href="/assets/images/favicon/safari-pinned-tab.svg" color="#5bbad5">
+  <link rel="shortcut icon" href="/assets/images/favicon/favicon.ico">
+  <meta name="msapplication-TileColor" content="#00aba9">
+  <meta name="msapplication-config" content="/assets/images/favicon/browserconfig.xml">
+  <meta name="theme-color" content="#ffffff">
+  <!-- Favicon -->
+
+  <link rel="stylesheet" href="/assets/css/main.css" />
+  
+    <script type="text/javascript">
+  window.addEventListener('load', themeChange);
+  const currentTheme = localStorage.getItem('theme') ? localStorage.getItem('theme') : null;
+  if (currentTheme)
+    document.documentElement.setAttribute('data-theme', currentTheme);
+
+  function themeChange() {
+    let button = document.querySelector('.theme-toggle');
+
+    button.addEventListener('click', function (e) {
+      let currentTheme = document.documentElement.getAttribute('data-theme');
+      if (currentTheme === 'dark') {
+        transition();
+        document.documentElement.setAttribute('data-theme', 'light');
+        localStorage.setItem('theme', 'light');
+      } else {
+        transition();
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('theme', 'dark');
+      }
+    });
+
+    let transition = () => {
+      document.documentElement.classList.add('transition');
+      window.setTimeout(() => {
+        document.documentElement.classList.remove('transition');
+      }, 1000);
+    }
+  }
+</script>
+
+
+  
+</head>
+<body>
+    <main class="page-content" aria-label="Content">
+      <div class="w">
+        <a href="/">home..</a>
+<h1 class="post-title">Sirius Hacking Part 1 - The Delta Row Compression</h1>
+<p class="post-date text-bold">
+  
+  
+    <span class="text-upcase">December 2022</span>
+  
+
+
+  
+  
+  (784 Words, 
+  5 Minutes)
+  
+
+</p>
+
+<div class="soopr-btn"
+   data-twitter="SooprCo"
+>
+</div>
+
+
+  <div class="">
+    
+  </div>
+
+
+<h1 id="foreword">Foreword</h1>
+<p>This series of posts describes obstacles and findings while reverse engineering the firmware of the <code class="language-plaintext highlighter-rouge">HP OfficeJet Pro 8710/8715</code> and is based on research done by <a href="https://www.jsof-tech.com/">JSOF</a>. My goal with this project is to eventually be able to run Doom on the device.</p>
+
+<h1 id="unpacking-a-firmware-update">Unpacking a firmware update</h1>
+<p>A firmware update of this printer has many different layers and <a href="https://www.jsof-tech.com/unpacking-hp-firmware-updates-part-1/">JSOF did a great job explaining all of these layers in detail</a> so I am not going too in depth. I was able to follow their blog posts and <a href="https://github.com/4g3v/SiriusHacking/blob/master/unpack-ful.py">create a script</a> which turns an update file (<code class="language-plaintext highlighter-rouge">*.ful</code>) into a flash image which can then be analyzed. The file I analyzed used a compression mode (in a single plane), also known as <code class="language-plaintext highlighter-rouge">Method 3</code> or <code class="language-plaintext highlighter-rouge">Delta Row Compression</code>. This method was not explained by JSOF though, so I am going to do that in this post.</p>
+
+<p>The update uses the special <code class="language-plaintext highlighter-rouge">FWUPDATE</code> language which uses PCL commands and <code class="language-plaintext highlighter-rouge">Raster Graphics</code> for data storage.
+There’s two types of data, <code class="language-plaintext highlighter-rouge">Rows</code> and <code class="language-plaintext highlighter-rouge">Planes</code>.
+<code class="language-plaintext highlighter-rouge">Rows</code> are used for black and white pixels, <code class="language-plaintext highlighter-rouge">Planes</code> for colored pixels and there’s multiple of these in an update. This structure repeats itself until the <code class="language-plaintext highlighter-rouge">End Raster</code> command <code class="language-plaintext highlighter-rouge">&lt;esc&gt;*rC</code>.</p>
+
+<p>Since the “pixels” are just bytes of the firmware, I am simply going to refer to them as data.
+For simplicity’s sake I will refer to <code class="language-plaintext highlighter-rouge">Rows</code> and <code class="language-plaintext highlighter-rouge">Planes</code> as <code class="language-plaintext highlighter-rouge">Chunks</code> since they are handled in pretty much the same way in the <code class="language-plaintext highlighter-rouge">FWUPDATE</code> language.</p>
+
+<p>A <code class="language-plaintext highlighter-rouge">Chunk</code> is specified by the <code class="language-plaintext highlighter-rouge">Transfer Raster</code> command which has the following structure:
+<code class="language-plaintext highlighter-rouge">&lt;esc&gt;*b(Amount of data)(W/V)</code>.
+This command can also specify the compression by having the type of the compression followed by <code class="language-plaintext highlighter-rouge">m</code> before the amount of data.</p>
+
+<table id="normalTable" class="dynamicTable">
+  <thead>
+    <tr>
+      <th style="text-align: center"><strong>Value</strong></th>
+      <th>0</th>
+      <th>1</th>
+      <th>2</th>
+      <th>3</th>
+      <th>4</th>
+      <th>5</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center"><strong>Compression Type</strong></td>
+      <td>Unencoded</td>
+      <td>Run-length encoding</td>
+      <td>TIFF</td>
+      <td>Delta row compression</td>
+      <td>Reserved</td>
+      <td>Adaptive compression</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>If it doesn’t, the compression of the previous <code class="language-plaintext highlighter-rouge">Chunk</code> will be used. Here’s an example of five <code class="language-plaintext highlighter-rouge">Chunks</code> color coded by their compression type and their data marked in green:
+<a href="/assets/images/part1/rows_example.png" target="_blank"><img src="/assets/images/part1/rows_example.png" alt="" /></a></p>
+
+<h1 id="delta-row-compression">Delta Row Compression</h1>
+<p><code class="language-plaintext highlighter-rouge">Delta Row Compression</code> basically only saves the differences between <code class="language-plaintext highlighter-rouge">Chunks</code> and applies them.</p>
+
+<p>The data of a delta row compressed <code class="language-plaintext highlighter-rouge">Chunk</code> consists of a <code class="language-plaintext highlighter-rouge">Command Byte</code> and one to eight <code class="language-plaintext highlighter-rouge">Replacement Bytes</code>. The first five bits of the <code class="language-plaintext highlighter-rouge">Command Byte</code> specify the <strong>offset</strong> (0-30), the last three bits specify the <strong>number of bytes to replace</strong> (1-8). 
+The replacement bytes are applied to the <code class="language-plaintext highlighter-rouge">Seed Row</code> with the respective offset.
+Once <strong>any</strong> <code class="language-plaintext highlighter-rouge">Chunk</code> is processed (<strong>regardless</strong> of the compression type), it becomes the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</p>
+
+<p>Here’s an example of three <code class="language-plaintext highlighter-rouge">Delta Row</code> compressed <code class="language-plaintext highlighter-rouge">Chunks</code> and a rundown on what happens each <code class="language-plaintext highlighter-rouge">Chunk</code>:
+<a href="/assets/images/part1/delta_row_example.png" target="_blank"><img src="/assets/images/part1/delta_row_example.png" alt="" /></a>
+<em>The small triangles represent the offset where we start replacing</em></p>
+
+<ol>
+  <li>Output <code class="language-plaintext highlighter-rouge">12</code> unencoded <code class="language-plaintext highlighter-rouge">X</code>’s as an example <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
+  <li>Replace <code class="language-plaintext highlighter-rouge">2</code> bytes (1 is specified but we have to add 1 everytime since you can only represent 0-7 with three bits) at offset <code class="language-plaintext highlighter-rouge">0</code> of the <code class="language-plaintext highlighter-rouge">Seed Row</code>. This output is now the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
+  <li>Replace <code class="language-plaintext highlighter-rouge">2</code> bytes at offset <code class="language-plaintext highlighter-rouge">2</code> of the new <code class="language-plaintext highlighter-rouge">Seed Row</code>. This too becomes the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
+  <li>Replace <code class="language-plaintext highlighter-rouge">6</code> bytes at offset <code class="language-plaintext highlighter-rouge">6</code> of the new <code class="language-plaintext highlighter-rouge">Seed Row</code>. This too becomes the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
+</ol>
+
+<p>This <code class="language-plaintext highlighter-rouge">(CommandByte)(ReplacementBytes)</code> structure is repeated multiple times if the <code class="language-plaintext highlighter-rouge">Chunk</code> requires more than eight replacement bytes, the offset then specifies the offset from the last replaced byte.
+Here’s an example of that as well:
+<a href="/assets/images/part1/multi_delta_row_example.png" target="_blank"><img src="/assets/images/part1/multi_delta_row_example.png" alt="" /></a>
+<em>The small triangle above the command byte represents the offset where we start replacing. The ones below the command byte represent the offset from which the next offset is applied to (the last replaced byte)</em></p>
+
+<p>Here’s the rundown:</p>
+<ol>
+  <li>Output <code class="language-plaintext highlighter-rouge">12</code> unencoded <code class="language-plaintext highlighter-rouge">X</code>’s as an example <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
+  <li>Delta row compressed <code class="language-plaintext highlighter-rouge">Chunk</code>:
+    <ol>
+      <li>Replace <code class="language-plaintext highlighter-rouge">3</code> bytes at offset <code class="language-plaintext highlighter-rouge">0</code> of the <code class="language-plaintext highlighter-rouge">Seed Row</code>. Note that the <code class="language-plaintext highlighter-rouge">Seed Row</code> doesn’t change since we haven’t finished this chunk yet.</li>
+      <li>Replace <code class="language-plaintext highlighter-rouge">1</code> byte at offset <code class="language-plaintext highlighter-rouge">0</code>, counting from the last replaced byte.</li>
+      <li>Replace <code class="language-plaintext highlighter-rouge">4</code> bytes at offset <code class="language-plaintext highlighter-rouge">2</code>, counting from the last replaced byte.</li>
+      <li>Replace <code class="language-plaintext highlighter-rouge">1</code> byte at offset <code class="language-plaintext highlighter-rouge">1</code>, counting from the last replaced byte.</li>
+    </ol>
+  </li>
+</ol>
+
+<p>As you can see, the only notable difference is that we apply the replacements to the same <code class="language-plaintext highlighter-rouge">Seed Row</code>.
+There’s also a way to have an offset bigger than <code class="language-plaintext highlighter-rouge">30</code> which I am going to skip since it’s not used in any firmware updates I have checked. Look at <code class="language-plaintext highlighter-rouge">Raster Graphics 6-27</code> of the <a href="https://developers.hp.com/system/files/attachments/PCL_5_Color_Tech_Reference_Manual.pdf">PCL 5 Color Technical Reference Manual</a> for more information about this.</p>
+
+<p>The update uses the latter format and using all of the info we have now, we can decompress the single chunk that uses this format with the same logic.
+Check out my unpacking <a href="https://github.com/4g3v/SiriusHacking/blob/master/unpack-ful.py">script</a> for an implementation of this.</p>
+
+
+        
+          <button title="Toggle Theme" class="theme-toggle">
+  <svg viewBox="0 0 32 32" width="24" height="24" fill="currentcolor">
+    <circle cx="16" cy="16" r="14" fill="none" stroke="currentcolor" stroke-width="4"></circle>
+    <path d="
+             M 16 0
+             A 16 16 0 0 0 16 32
+             z">
+    </path>
+  </svg>
+</button>
+
+        
+        <div class="credits">&copy;&nbsp;2023&nbsp;4g3v
+          •&nbsp;Theme <a href="https://github.com/abhinavs/moonwalk" target="_blank" rel="noreferrer">Moonwalk</a>
+        </div>
+      </div>
+    </main></body>
+</html>

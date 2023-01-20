@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.2">Jekyll</generator><link href="http://0.0.0.0:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://0.0.0.0:4000/" rel="alternate" type="text/html" /><updated>2023-01-20T20:00:47+01:00</updated><id>http://0.0.0.0:4000/feed.xml</id><title type="html">vegamay.li</title><subtitle>Welcome to my site! Here I will be posting stuff about reverse engineering and all things cybersecurity.
+</subtitle><author><name>4g3v</name></author><entry><title type="html">Sirius Hacking Part 1 - The Delta Row Compression</title><link href="http://0.0.0.0:4000/printer-part1" rel="alternate" type="text/html" title="Sirius Hacking Part 1 - The Delta Row Compression" /><published>2022-12-06T00:00:00+01:00</published><updated>2022-12-06T00:00:00+01:00</updated><id>http://0.0.0.0:4000/printer-part1</id><content type="html" xml:base="http://0.0.0.0:4000/printer-part1">&lt;h1 id=&quot;foreword&quot;&gt;Foreword&lt;/h1&gt;
+&lt;p&gt;This series of posts describes obstacles and findings while reverse engineering the firmware of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;HP OfficeJet Pro 8710/8715&lt;/code&gt; and is based on research done by &lt;a href=&quot;https://www.jsof-tech.com/&quot;&gt;JSOF&lt;/a&gt;. My goal with this project is to eventually be able to run Doom on the device.&lt;/p&gt;
+
+&lt;h1 id=&quot;unpacking-a-firmware-update&quot;&gt;Unpacking a firmware update&lt;/h1&gt;
+&lt;p&gt;A firmware update of this printer has many different layers and &lt;a href=&quot;https://www.jsof-tech.com/unpacking-hp-firmware-updates-part-1/&quot;&gt;JSOF did a great job explaining all of these layers in detail&lt;/a&gt; so I am not going too in depth. I was able to follow their blog posts and &lt;a href=&quot;https://github.com/4g3v/SiriusHacking/blob/master/unpack-ful.py&quot;&gt;create a script&lt;/a&gt; which turns an update file (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;*.ful&lt;/code&gt;) into a flash image which can then be analyzed. The file I analyzed used a compression mode (in a single plane), also known as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Method 3&lt;/code&gt; or &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Delta Row Compression&lt;/code&gt;. This method was not explained by JSOF though, so I am going to do that in this post.&lt;/p&gt;
+
+&lt;p&gt;The update uses the special &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;FWUPDATE&lt;/code&gt; language which uses PCL commands and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Raster Graphics&lt;/code&gt; for data storage.
+There’s two types of data, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt;.
+&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; are used for black and white pixels, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt; for colored pixels and there’s multiple of these in an update. This structure repeats itself until the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;End Raster&lt;/code&gt; command &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;esc&amp;gt;*rC&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Since the “pixels” are just bytes of the firmware, I am simply going to refer to them as data.
+For simplicity’s sake I will refer to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt; as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; since they are handled in pretty much the same way in the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;FWUPDATE&lt;/code&gt; language.&lt;/p&gt;
+
+&lt;p&gt;A &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; is specified by the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Transfer Raster&lt;/code&gt; command which has the following structure:
+&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;esc&amp;gt;*b(Amount of data)(W/V)&lt;/code&gt;.
+This command can also specify the compression by having the type of the compression followed by &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;m&lt;/code&gt; before the amount of data.&lt;/p&gt;
+
+&lt;table id=&quot;normalTable&quot; class=&quot;dynamicTable&quot;&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th style=&quot;text-align: center&quot;&gt;&lt;strong&gt;Value&lt;/strong&gt;&lt;/th&gt;
+      &lt;th&gt;0&lt;/th&gt;
+      &lt;th&gt;1&lt;/th&gt;
+      &lt;th&gt;2&lt;/th&gt;
+      &lt;th&gt;3&lt;/th&gt;
+      &lt;th&gt;4&lt;/th&gt;
+      &lt;th&gt;5&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td style=&quot;text-align: center&quot;&gt;&lt;strong&gt;Compression Type&lt;/strong&gt;&lt;/td&gt;
+      &lt;td&gt;Unencoded&lt;/td&gt;
+      &lt;td&gt;Run-length encoding&lt;/td&gt;
+      &lt;td&gt;TIFF&lt;/td&gt;
+      &lt;td&gt;Delta row compression&lt;/td&gt;
+      &lt;td&gt;Reserved&lt;/td&gt;
+      &lt;td&gt;Adaptive compression&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;If it doesn’t, the compression of the previous &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; will be used. Here’s an example of five &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; color coded by their compression type and their data marked in green:
+&lt;a href=&quot;/assets/images/part1/rows_example.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part1/rows_example.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;h1 id=&quot;delta-row-compression&quot;&gt;Delta Row Compression&lt;/h1&gt;
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Delta Row Compression&lt;/code&gt; basically only saves the differences between &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; and applies them.&lt;/p&gt;
+
+&lt;p&gt;The data of a delta row compressed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; consists of a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Command Byte&lt;/code&gt; and one to eight &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Replacement Bytes&lt;/code&gt;. The first five bits of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Command Byte&lt;/code&gt; specify the &lt;strong&gt;offset&lt;/strong&gt; (0-30), the last three bits specify the &lt;strong&gt;number of bytes to replace&lt;/strong&gt; (1-8). 
+The replacement bytes are applied to the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt; with the respective offset.
+Once &lt;strong&gt;any&lt;/strong&gt; &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; is processed (&lt;strong&gt;regardless&lt;/strong&gt; of the compression type), it becomes the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Here’s an example of three &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Delta Row&lt;/code&gt; compressed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; and a rundown on what happens each &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt;:
+&lt;a href=&quot;/assets/images/part1/delta_row_example.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part1/delta_row_example.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+&lt;em&gt;The small triangles represent the offset where we start replacing&lt;/em&gt;&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Output &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;12&lt;/code&gt; unencoded &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;X&lt;/code&gt;’s as an example &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
+  &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;2&lt;/code&gt; bytes (1 is specified but we have to add 1 everytime since you can only represent 0-7 with three bits) at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0&lt;/code&gt; of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;. This output is now the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
+  &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;2&lt;/code&gt; bytes at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;2&lt;/code&gt; of the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;. This too becomes the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
+  &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;6&lt;/code&gt; bytes at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;6&lt;/code&gt; of the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;. This too becomes the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;This &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;(CommandByte)(ReplacementBytes)&lt;/code&gt; structure is repeated multiple times if the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; requires more than eight replacement bytes, the offset then specifies the offset from the last replaced byte.
+Here’s an example of that as well:
+&lt;a href=&quot;/assets/images/part1/multi_delta_row_example.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part1/multi_delta_row_example.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+&lt;em&gt;The small triangle above the command byte represents the offset where we start replacing. The ones below the command byte represent the offset from which the next offset is applied to (the last replaced byte)&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;Here’s the rundown:&lt;/p&gt;
+&lt;ol&gt;
+  &lt;li&gt;Output &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;12&lt;/code&gt; unencoded &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;X&lt;/code&gt;’s as an example &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
+  &lt;li&gt;Delta row compressed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt;:
+    &lt;ol&gt;
+      &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;3&lt;/code&gt; bytes at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0&lt;/code&gt; of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;. Note that the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt; doesn’t change since we haven’t finished this chunk yet.&lt;/li&gt;
+      &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;1&lt;/code&gt; byte at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0&lt;/code&gt;, counting from the last replaced byte.&lt;/li&gt;
+      &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;4&lt;/code&gt; bytes at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;2&lt;/code&gt;, counting from the last replaced byte.&lt;/li&gt;
+      &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;1&lt;/code&gt; byte at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;1&lt;/code&gt;, counting from the last replaced byte.&lt;/li&gt;
+    &lt;/ol&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;As you can see, the only notable difference is that we apply the replacements to the same &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.
+There’s also a way to have an offset bigger than &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;30&lt;/code&gt; which I am going to skip since it’s not used in any firmware updates I have checked. Look at &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Raster Graphics 6-27&lt;/code&gt; of the &lt;a href=&quot;https://developers.hp.com/system/files/attachments/PCL_5_Color_Tech_Reference_Manual.pdf&quot;&gt;PCL 5 Color Technical Reference Manual&lt;/a&gt; for more information about this.&lt;/p&gt;
+
+&lt;p&gt;The update uses the latter format and using all of the info we have now, we can decompress the single chunk that uses this format with the same logic.
+Check out my unpacking &lt;a href=&quot;https://github.com/4g3v/SiriusHacking/blob/master/unpack-ful.py&quot;&gt;script&lt;/a&gt; for an implementation of this.&lt;/p&gt;</content><author><name>4g3v</name></author><summary type="html">Foreword This series of posts describes obstacles and findings while reverse engineering the firmware of the HP OfficeJet Pro 8710/8715 and is based on research done by JSOF. My goal with this project is to eventually be able to run Doom on the device.</summary></entry></feed>
