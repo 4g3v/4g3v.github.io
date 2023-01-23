@@ -94,7 +94,7 @@
 
   
   
-  (784 Words, 
+  (786 Words, 
   5 Minutes)
   
 
@@ -118,15 +118,15 @@
 <p>A firmware update of this printer has many different layers and <a href="https://www.jsof-tech.com/unpacking-hp-firmware-updates-part-1/">JSOF did a great job explaining all of these layers in detail</a> so I am not going too in depth. I was able to follow their blog posts and <a href="https://github.com/4g3v/SiriusHacking/blob/master/unpack-ful.py">create a script</a> which turns an update file (<code class="language-plaintext highlighter-rouge">*.ful</code>) into a flash image which can then be analyzed. The file I analyzed used a compression mode (in a single plane), also known as <code class="language-plaintext highlighter-rouge">Method 3</code> or <code class="language-plaintext highlighter-rouge">Delta Row Compression</code>. This method was not explained by JSOF though, so I am going to do that in this post.</p>
 
 <p>The update uses the special <code class="language-plaintext highlighter-rouge">FWUPDATE</code> language which uses PCL commands and <code class="language-plaintext highlighter-rouge">Raster Graphics</code> for data storage.
-There’s two types of data, <code class="language-plaintext highlighter-rouge">Rows</code> and <code class="language-plaintext highlighter-rouge">Planes</code>.
-<code class="language-plaintext highlighter-rouge">Rows</code> are used for black and white pixels, <code class="language-plaintext highlighter-rouge">Planes</code> for colored pixels and there’s multiple of these in an update. This structure repeats itself until the <code class="language-plaintext highlighter-rouge">End Raster</code> command <code class="language-plaintext highlighter-rouge">&lt;esc&gt;*rC</code>.</p>
+There are two types of data, <code class="language-plaintext highlighter-rouge">Rows</code> and <code class="language-plaintext highlighter-rouge">Planes</code>.
+<code class="language-plaintext highlighter-rouge">Rows</code> are used for black and white pixels, <code class="language-plaintext highlighter-rouge">Planes</code> for colored pixels, and there are multiple of these in an update. This structure repeats itself until the <code class="language-plaintext highlighter-rouge">End Raster</code> command <code class="language-plaintext highlighter-rouge">&lt;esc&gt;*rC</code>.</p>
 
 <p>Since the “pixels” are just bytes of the firmware, I am simply going to refer to them as data.
-For simplicity’s sake I will refer to <code class="language-plaintext highlighter-rouge">Rows</code> and <code class="language-plaintext highlighter-rouge">Planes</code> as <code class="language-plaintext highlighter-rouge">Chunks</code> since they are handled in pretty much the same way in the <code class="language-plaintext highlighter-rouge">FWUPDATE</code> language.</p>
+For simplicity’s sake, I will refer to <code class="language-plaintext highlighter-rouge">Rows</code> and <code class="language-plaintext highlighter-rouge">Planes</code> as <code class="language-plaintext highlighter-rouge">Chunks</code> since they are handled in pretty much the same way in the <code class="language-plaintext highlighter-rouge">FWUPDATE</code> language.</p>
 
 <p>A <code class="language-plaintext highlighter-rouge">Chunk</code> is specified by the <code class="language-plaintext highlighter-rouge">Transfer Raster</code> command which has the following structure:
 <code class="language-plaintext highlighter-rouge">&lt;esc&gt;*b(Amount of data)(W/V)</code>.
-This command can also specify the compression by having the type of the compression followed by <code class="language-plaintext highlighter-rouge">m</code> before the amount of data.</p>
+This command can also specify the compression by having the type of compression followed by <code class="language-plaintext highlighter-rouge">m</code> before the amount of data.</p>
 
 <table id="normalTable" class="dynamicTable">
   <thead>
@@ -153,13 +153,13 @@ This command can also specify the compression by having the type of the compress
   </tbody>
 </table>
 
-<p>If it doesn’t, the compression of the previous <code class="language-plaintext highlighter-rouge">Chunk</code> will be used. Here’s an example of five <code class="language-plaintext highlighter-rouge">Chunks</code> color coded by their compression type and their data marked in green:
+<p>If it doesn’t, the compression of the previous <code class="language-plaintext highlighter-rouge">Chunk</code> will be used. Here’s an example of five <code class="language-plaintext highlighter-rouge">Chunks</code> color-coded by their compression type and their data marked in green:
 <a href="/assets/images/part1/rows_example.png" target="_blank"><img src="/assets/images/part1/rows_example.png" alt="" /></a></p>
 
 <h1 id="delta-row-compression">Delta Row Compression</h1>
 <p><code class="language-plaintext highlighter-rouge">Delta Row Compression</code> basically only saves the differences between <code class="language-plaintext highlighter-rouge">Chunks</code> and applies them.</p>
 
-<p>The data of a delta row compressed <code class="language-plaintext highlighter-rouge">Chunk</code> consists of a <code class="language-plaintext highlighter-rouge">Command Byte</code> and one to eight <code class="language-plaintext highlighter-rouge">Replacement Bytes</code>. The first five bits of the <code class="language-plaintext highlighter-rouge">Command Byte</code> specify the <strong>offset</strong> (0-30), the last three bits specify the <strong>number of bytes to replace</strong> (1-8). 
+<p>The data of a delta row compressed <code class="language-plaintext highlighter-rouge">Chunk</code> consists of a <code class="language-plaintext highlighter-rouge">Command Byte</code> and one to eight <code class="language-plaintext highlighter-rouge">Replacement Bytes</code>. The first five bits of the <code class="language-plaintext highlighter-rouge">Command Byte</code> specify the <strong>offset</strong> (0-30), and the last three bits specify the <strong>number of bytes to replace</strong> (1-8). 
 The replacement bytes are applied to the <code class="language-plaintext highlighter-rouge">Seed Row</code> with the respective offset.
 Once <strong>any</strong> <code class="language-plaintext highlighter-rouge">Chunk</code> is processed (<strong>regardless</strong> of the compression type), it becomes the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</p>
 
@@ -169,7 +169,7 @@ Once <strong>any</strong> <code class="language-plaintext highlighter-rouge">Chu
 
 <ol>
   <li>Output <code class="language-plaintext highlighter-rouge">12</code> unencoded <code class="language-plaintext highlighter-rouge">X</code>’s as an example <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
-  <li>Replace <code class="language-plaintext highlighter-rouge">2</code> bytes (1 is specified but we have to add 1 everytime since you can only represent 0-7 with three bits) at offset <code class="language-plaintext highlighter-rouge">0</code> of the <code class="language-plaintext highlighter-rouge">Seed Row</code>. This output is now the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
+  <li>Replace <code class="language-plaintext highlighter-rouge">2</code> bytes (1 is specified but we have to add 1 every time since you can only represent 0-7 with three bits) at offset <code class="language-plaintext highlighter-rouge">0</code> of the <code class="language-plaintext highlighter-rouge">Seed Row</code>. This output is now the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
   <li>Replace <code class="language-plaintext highlighter-rouge">2</code> bytes at offset <code class="language-plaintext highlighter-rouge">2</code> of the new <code class="language-plaintext highlighter-rouge">Seed Row</code>. This too becomes the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
   <li>Replace <code class="language-plaintext highlighter-rouge">6</code> bytes at offset <code class="language-plaintext highlighter-rouge">6</code> of the new <code class="language-plaintext highlighter-rouge">Seed Row</code>. This too becomes the new <code class="language-plaintext highlighter-rouge">Seed Row</code>.</li>
 </ol>

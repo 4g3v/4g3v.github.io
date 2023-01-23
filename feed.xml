@@ -1,20 +1,252 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.2">Jekyll</generator><link href="http://0.0.0.0:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://0.0.0.0:4000/" rel="alternate" type="text/html" /><updated>2023-01-20T20:00:47+01:00</updated><id>http://0.0.0.0:4000/feed.xml</id><title type="html">vegamay.li</title><subtitle>Welcome to my site! Here I will be posting stuff about reverse engineering and all things cybersecurity.
-</subtitle><author><name>4g3v</name></author><entry><title type="html">Sirius Hacking Part 1 - The Delta Row Compression</title><link href="http://0.0.0.0:4000/printer-part1" rel="alternate" type="text/html" title="Sirius Hacking Part 1 - The Delta Row Compression" /><published>2022-12-06T00:00:00+01:00</published><updated>2022-12-06T00:00:00+01:00</updated><id>http://0.0.0.0:4000/printer-part1</id><content type="html" xml:base="http://0.0.0.0:4000/printer-part1">&lt;h1 id=&quot;foreword&quot;&gt;Foreword&lt;/h1&gt;
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.2">Jekyll</generator><link href="http://0.0.0.0:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://0.0.0.0:4000/" rel="alternate" type="text/html" /><updated>2023-01-24T00:20:43+01:00</updated><id>http://0.0.0.0:4000/feed.xml</id><title type="html">vegamay.li</title><subtitle>Welcome to my site! Here I will be posting stuff about reverse engineering and all things cybersecurity.
+</subtitle><author><name>4g3v</name></author><entry><title type="html">Sirius Hacking Part 2 - System Internals</title><link href="http://0.0.0.0:4000/printer-part2" rel="alternate" type="text/html" title="Sirius Hacking Part 2 - System Internals" /><published>2023-01-09T00:00:00+01:00</published><updated>2023-01-09T00:00:00+01:00</updated><id>http://0.0.0.0:4000/printer-part2</id><content type="html" xml:base="http://0.0.0.0:4000/printer-part2">&lt;h1 id=&quot;disclaimer&quot;&gt;Disclaimer&lt;/h1&gt;
+&lt;p&gt;All of the following information is based on my own research and applies to the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;HP OfficeJet Pro 8715&lt;/code&gt; with the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;D9L18-80076 REV C WEBER BASE&lt;/code&gt; board and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;weber_base_vr2_pp1_WBP2CN1848AR_nbx_signed&lt;/code&gt; firmware revision.
+This post is not meant as a reverse engineering introduction, it’s meant to help other researchers get a start in hacking this device/other devices running the same OS.&lt;/p&gt;
+
+&lt;h1 id=&quot;the-hardware&quot;&gt;The hardware&lt;/h1&gt;
+
+&lt;p&gt;&lt;a href=&quot;/assets/images/part2/ASIC_2.png&quot; target=&quot;_blank&quot; class=&quot;asic&quot;&gt;&lt;img src=&quot;/assets/images/part2/ASIC_2.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+&lt;a href=&quot;/assets/images/part2/ASIC.png&quot; target=&quot;_blank&quot; class=&quot;asic&quot;&gt;&lt;img src=&quot;/assets/images/part2/ASIC.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;There are two cores on the ASIC, one big endian &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ARM Cortex-R4&lt;/code&gt; core running on 150mhz and one little-endian &lt;a href=&quot;https://en.wikipedia.org/wiki/ST200_family&quot;&gt;ST231&lt;/a&gt; (a processor architecture developed by &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;HP&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;STMicroelectronics&lt;/code&gt;) core named &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;pie&lt;/code&gt;.
+These two cores can communicate with each other, though I haven’t figured out the purpose of &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;pie&lt;/code&gt; yet.
+Looking at the output of the &lt;a href=&quot;#serial-shell&quot;&gt;Serial Shell&lt;/a&gt; while the device boots suggests that the name of this specific ASIC is &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Bird&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;The board also has 128 MB of SLC NAND flash memory (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Macronix MX30LF1GE8AB-TI&lt;/code&gt;) as well as 128 MB of DDR3 SDRAM (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Winbond W631GG6KB-15&lt;/code&gt;).&lt;/p&gt;
+
+&lt;p&gt;The front panel contains a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;320x240&lt;/code&gt; &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GiantPlus&lt;/code&gt; LCD screen and a capacitive touchscreen that’s bigger than the screen. This touchscreen is also used to implement the soft buttons.&lt;/p&gt;
+
+&lt;p&gt;There’s also a WiFi module called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Ultra_Spectra&lt;/code&gt;/&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SDGOB-1392&lt;/code&gt; which uses a Broadcom &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;BCM943143EDSBP&lt;/code&gt;.
+This module uses &lt;a href=&quot;https://www.sdcard.org/developers/sd-standard-overview/sdio-isdio/&quot;&gt;SDIO&lt;/a&gt; to communicate with the board and its firmware/config resides in the ROM filesystem.&lt;/p&gt;
+
+&lt;h1 id=&quot;the-operating-systems&quot;&gt;The operating systems&lt;/h1&gt;
+&lt;p&gt;Both of these cores run &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Sirius&lt;/code&gt;, a custom OS built on top of another &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;RTOS&lt;/code&gt;.
+The &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ST231&lt;/code&gt; core runs on &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;OS21&lt;/code&gt;, a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;RTOS&lt;/code&gt; by &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;STMicroelectronics&lt;/code&gt;.
+The &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ARM&lt;/code&gt; core runs on &lt;a href=&quot;https://en.wikipedia.org/wiki/ThreadX&quot;&gt;ThreadX&lt;/a&gt; (specifically &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ThreadX ARM9/Green Hills Version G5.1.5.0 SN: HP_RC2_INTERNAL_USE_042007&lt;/code&gt;), an embedded real-time operating system by &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Express Logic&lt;/code&gt; which was purchased and open-sourced by Microsoft in 2019. Being able to match the disassembly with the source turned out to be very useful while reverse engineering the firmware.
+The firmware uses &lt;a href=&quot;https://treck.com/&quot;&gt;Treck&lt;/a&gt; as its TCP/IP stack.&lt;/p&gt;
+
+&lt;p&gt;I’ve created an &lt;a href=&quot;https://github.com/4g3v/SiriusHacking/blob/master/SiriusFlashLoader.py&quot;&gt;IDA loader&lt;/a&gt; for &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Sirius&lt;/code&gt; flash images, it sets up all of the segments, decompresses compressed segments, and handles the memcpy segments.&lt;/p&gt;
+
+&lt;h1 id=&quot;sirius-modules&quot;&gt;Sirius Modules&lt;/h1&gt;
+&lt;p&gt;While reverse engineering pretty much any functionality, you’ll quickly notice lots of indirect calls. These are likely to be exports of modules.&lt;/p&gt;
+
+&lt;p&gt;The &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;.module&lt;/code&gt; segment contains an array with pointers to all module entries.
+&lt;a href=&quot;/assets/images/part2/module_Segment.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/module_Segment.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;/assets/images/part2/ggw_Module.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_Module.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+&lt;em&gt;(This is the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ggw&lt;/code&gt; module definition)&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;Modules can be libraries, components, or a hybrid of both. They can export functions and other modules can import those functions. They have a list of tasks as well as a list of imported and exported events. They also have an ID which is used in the import/export mechanism.
+Each module has an important function in its definition which I’ve called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GetFunctionTable&lt;/code&gt;.
+&lt;a href=&quot;/assets/images/part2/ggw_GetFunctionTable.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_GetFunctionTable.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;It returns a pointer to the FunctionTable which in itself contains pointers to functions such as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Init&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Start&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GetExport&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SetImport&lt;/code&gt; etc.
+&lt;a href=&quot;/assets/images/part2/ggw_FuncTable.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_FuncTable.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;After ThreadX booted, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Sirius&lt;/code&gt; starts to initialize the modules. It does a bunch of error checking, initializes internal structures, and links all of the imports and exports together.
+It then starts the modules by doing the following for each entry:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;Calling the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Init&lt;/code&gt; function&lt;/li&gt;
+  &lt;li&gt;Handling imports/exports&lt;/li&gt;
+  &lt;li&gt;Creating a thread for each task with a predefined priority and specified stack size. These are started automatically and kept track of in a list.&lt;/li&gt;
+  &lt;li&gt;Calling &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;early_start&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Start&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;StartComplete&lt;/code&gt;, and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;StartComplete2&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Each import/export has the same structure, they have a type (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;VTABLE&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;DIRECT&lt;/code&gt;), an &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;IID&lt;/code&gt;, which I suppose stands for interface id, as well as an &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Enum&lt;/code&gt;. Exports additionally always specify a module id whereas imports only specify them if there are multiple exports with the same &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;IID&lt;/code&gt;.&lt;/p&gt;
+
+&lt;h1 id=&quot;handling-importsexports&quot;&gt;Handling imports/exports&lt;/h1&gt;
+&lt;p&gt;Let’s resolve the imports of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ggw&lt;/code&gt; module to give you an idea of how it works.
+&lt;a href=&quot;/assets/images/part2/ggw_Imports.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_Imports.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Searching for the first &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;IID&lt;/code&gt; (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0x10D47&lt;/code&gt;), we see that it’s defined in the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ds2&lt;/code&gt; module and has an &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Enum&lt;/code&gt; value of &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0x1F&lt;/code&gt;:
+&lt;a href=&quot;/assets/images/part2/ds2_Module.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ds2_Module.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Sirius&lt;/code&gt; first calls the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GetExport&lt;/code&gt; function of the module that exports this &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;IID&lt;/code&gt; (in this case &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ds2_GetExport&lt;/code&gt;), providing the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Enum&lt;/code&gt; of the export definition.
+&lt;a href=&quot;/assets/images/part2/ds2_GetExport.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ds2_GetExport.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;This function subtracts &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0x1F&lt;/code&gt; from the passed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Enum&lt;/code&gt; value and returns the element located at that index from the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ds2_ExportTable&lt;/code&gt; array. Since the export’s &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Enum&lt;/code&gt;, we are interested in is &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0x1F&lt;/code&gt;, the function just returns the first element of the ExportTable.&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Sirius&lt;/code&gt; then calls the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SetImport&lt;/code&gt; function of the module that imports this &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;IID&lt;/code&gt; (in this case &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ggw_SetImport&lt;/code&gt;), providing the enum of the import (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0xD8&lt;/code&gt;) as well as the returned element of the ExportTable.
+&lt;a href=&quot;/assets/images/part2/ggw_SetImport.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_SetImport.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;This function works similarly to the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GetExport&lt;/code&gt; functions, except that it stores the passed element to the index (the passed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Enum&lt;/code&gt; minus &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0xD7&lt;/code&gt;) in the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ggw_ImportTable&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Here’s some pseudocode illustrating the process:&lt;/p&gt;
+&lt;div class=&quot;language-c code highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;ds2_GetExport&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;exportEnum&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ds2_ExportTable&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;exportEnum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;mh&quot;&gt;0x1F&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;];&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;ggw_SetImport&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;importEnum&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;value&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;ggw_ImportTable&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;importEnum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;mh&quot;&gt;0xD7&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;value&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;val&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ds2_GetExport&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mh&quot;&gt;0x1F&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;ggw_SetImport&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mh&quot;&gt;0xD8&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;val&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Even though this is the &lt;strong&gt;first&lt;/strong&gt; import definition, it’s the &lt;strong&gt;second&lt;/strong&gt; import in the ImportTable since &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0xD8&lt;/code&gt;-&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0xD7&lt;/code&gt; equals &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;1&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;We can repeat this logic for the remaining entries and create a structure in IDA to then set the type of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ggw_ImportTable&lt;/code&gt; to that structure.&lt;/p&gt;
+
+&lt;table style=&quot;max-width: 440px&quot; class=&quot;dynamicTable&quot;&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;ImportTable index&lt;/th&gt;
+      &lt;th&gt;Enum&lt;/th&gt;
+      &lt;th&gt;IID&lt;/th&gt;
+      &lt;th&gt;Exported in module&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;0&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0xD7&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0x10E84&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;conn_mgr&lt;/code&gt;&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;1&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0xD8&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0x10D47&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ds2&lt;/code&gt;&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;2&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0xD9&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0x10DA0&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;nca&lt;/code&gt;&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;3&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0xDA&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0x10E5A&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;COMP_IO_SOCKET_MGR&lt;/code&gt;&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;&lt;a href=&quot;/assets/images/part2/ggw_ImportTableStruct.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_ImportTableStruct.png&quot; alt=&quot;&quot; class=&quot;zeroMargin&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Turning this:
+&lt;a href=&quot;/assets/images/part2/ggw_ImportTableBefore.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_ImportTableBefore.png&quot; alt=&quot;&quot; class=&quot;zeroMargin&quot; /&gt;&lt;/a&gt;
+Into this:
+&lt;a href=&quot;/assets/images/part2/ggw_ImportTableAfter.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_ImportTableAfter.png&quot; alt=&quot;&quot; class=&quot;zeroMargin&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;We still don’t know what functions are being called though.
+To understand this, we have to know what the ExportTables contain.
+&lt;a href=&quot;/assets/images/part2/conn_mgr_ExportTable.gif&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/conn_mgr_ExportTable.gif&quot; alt=&quot;&quot; class=&quot;zeroMargin&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;As you can see, it’s pointers that point to pointers of a bunch of other function pointers.
+We can now create another struct in IDA representing these function pointers and set all of the fields to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;void*&lt;/code&gt;:
+&lt;a href=&quot;/assets/images/part2/conn_mgr_ExportTableEntryStruct.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/conn_mgr_ExportTableEntryStruct.png&quot; alt=&quot;&quot; class=&quot;zeroMargin&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Now we apply this structure:
+&lt;a href=&quot;/assets/images/part2/conn_mgr_ExportTableStruct.gif&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/conn_mgr_ExportTableStruct.gif&quot; alt=&quot;&quot; class=&quot;zeroMargin&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Of course, we still have to reverse these functions and give them, as well as the fields in the struct, proper names.&lt;/p&gt;
+
+&lt;p&gt;To get some nice decompiler output, we set the type of &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;conn_mgr_10E84&lt;/code&gt; in the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ggw_ImportTableStruct&lt;/code&gt; to a pointer to a pointer of the created struct:
+&lt;a href=&quot;/assets/images/part2/ggw_ImportTableStructConnMgrType.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_ImportTableStructConnMgrType.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+This turns the decompiler output from earlier to this:
+&lt;a href=&quot;/assets/images/part2/ggw_ImportTableAfterConnMgrStruct.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/ggw_ImportTableAfterConnMgrStruct.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;All modules I’ve looked at work in the same way, the only difference being the number that’s subtracted from the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Enum&lt;/code&gt; in the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GetExport&lt;/code&gt; / &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SetImport&lt;/code&gt; functions.
+However, this logic does not apply to imports/exports with the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;DIRECT&lt;/code&gt; type. I haven’t looked much into them, but I suppose that these are just statically linked.&lt;/p&gt;
+
+&lt;p&gt;To make this task easier, I’ve created an &lt;a href=&quot;https://github.com/4g3v/SiriusHacking/blob/master/SiriusModuleTool.py&quot;&gt;IDA script&lt;/a&gt; that defines all of the modules. It labels everything, creates functions for the tasks, and declares the module’s FunctionTable functions. You still have to resolve the imports yourself though.&lt;/p&gt;
+
+&lt;h1 id=&quot;serial-shell&quot;&gt;Serial Shell&lt;/h1&gt;
+&lt;p&gt;While taking a look at the board of the printer, I noticed two Serial headers (labeled &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SERIAL0&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SERIAL1&lt;/code&gt;) consisting of four pads. This is an indication of UART.
+Lots of embedded devices have some sort of UART shell, oftentimes they are disabled or only provide limited functionality though. 
+Using a multimeter to take a look at the voltage and the continuity test to find the ground pad, I was able to figure out the following pinout:
+&lt;a href=&quot;/assets/images/part2/UART_Pinout.jpg&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/UART_Pinout.jpg&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+&lt;em&gt;Note that I’m not responsible for any damages if this pinout doesn’t match your board revision.&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;I then soldered a total of five breadboard wires with female headers to the two &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;TX&lt;/code&gt; pads, the two &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;RX&lt;/code&gt; pads, and one to any of the two &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GND&lt;/code&gt; pads (since it’s the same ground plane anyway).&lt;/p&gt;
+
+&lt;p&gt;I connected the wires to a USB-to-UART bridge like this:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;RX&lt;/code&gt; on the board to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;TX&lt;/code&gt; on the bridge&lt;/li&gt;
+  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;TX&lt;/code&gt; on the board to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;RX&lt;/code&gt; on the bridge&lt;/li&gt;
+  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GND&lt;/code&gt; to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;GND&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Afterward, I was expecting lots of trial and error trying to figure out the baud rate, but to my surprise the first baud rate I tried worked!&lt;/p&gt;
+
+&lt;p&gt;I was greeted by the following after setting it to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;115200&lt;/code&gt; and turning on the printer:
+&lt;a href=&quot;/assets/images/part2/UART_Bootlog.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/UART_Bootlog.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Trying undefined commands yields &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;error: I don&apos;t understand&lt;/code&gt;. By searching for that string in the firmware, I quickly identified the function responsible for adding commands and thus I found all commands.
+&lt;a href=&quot;/assets/images/part2/UART_Example.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/UART_Example.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+&lt;em&gt;Running some commands&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;Unfortunately, there aren’t many commands, and those that exist don’t seem too useful.
+There are commands to display and modify memory and even call arbitrary functions. These aren’t added though when the printer is in the “&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SecureBoot&lt;/code&gt;” mode:
+&lt;a href=&quot;/assets/images/part2/mem_ShellCommands.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/mem_ShellCommands.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+&lt;em&gt;Note that even though these commands mention &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;vxWorks&lt;/code&gt;, another &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;RTOS&lt;/code&gt;, I didn’t find any other indication of it&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;I’ve named it this way because the code calls a function and only adds these commands if it returns false. This function is also called in a bunch of other places, one function of them is responsible for parsing srecords and calls this &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;IsSecureBoot&lt;/code&gt; function like so:
+&lt;a href=&quot;/assets/images/part2/IsSecureBoot.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/IsSecureBoot.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;What’s great about this shell is that it also returns crashdumps, returning the type of crash, the content of all registers, and a stack dump:
+&lt;a href=&quot;/assets/images/part2/UART_Crashdump.gif&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/UART_Crashdump.gif&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Looking at the code some more, I kept seeing references to a lot more commands.
+&lt;a href=&quot;/assets/images/part2/udw_UsageStrings.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/udw_UsageStrings.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Trying to run them as is, returned the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;error: I don&apos;t understand&lt;/code&gt; error again though.
+It turns out that these are so-called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Underware&lt;/code&gt;/&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;udw&lt;/code&gt; commands.&lt;/p&gt;
+
+&lt;h1 id=&quot;underware&quot;&gt;Underware&lt;/h1&gt;
+&lt;p&gt;I have never heard this term before and at the time ChatGPT was just released, so I asked for a definition:
+&lt;a href=&quot;/assets/images/part2/udw_ChatGPT.jpg&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/udw_ChatGPT.jpg&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;This is quite fitting, it’s basically all of the software that turns this device into a printer and not just some generic device.&lt;/p&gt;
+
+&lt;p&gt;I found a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;system&lt;/code&gt; like function that invokes these commands.
+&lt;a href=&quot;/assets/images/part2/udw_system.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/udw_system.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Since I was getting errors when trying to invoke these commands over the shell, I thought that they were “internal” to the system.
+However, I kept digging and soon found the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;udws&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;udws_rpc&lt;/code&gt; shell commands.
+These allow you to specify some command and optional arguments to that command.
+&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;udws_rpc&lt;/code&gt; runs underware commands on the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;pie&lt;/code&gt; core (Remember, it also runs &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Sirius&lt;/code&gt;).
+&lt;a href=&quot;/assets/images/part2/udws_Example.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/udws_Example.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;
+&lt;em&gt;Running some example commands, nice easter egg btw&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;I was trying to find all of the command definitions to figure out what sort of functionality was exposed, but I kept seeing weird strings next to normal commands:
+&lt;a href=&quot;/assets/images/part2/udw_EncryptedCommands.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/udw_EncryptedCommands.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;It turns out that the developers decided to hide some commands by encrypting them.
+Luckily, there are commands to decrypt/encrypt commands, named &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;udw.decr&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;udw.encr&lt;/code&gt; respectively.&lt;/p&gt;
+
+&lt;p&gt;There are a &lt;strong&gt;lot&lt;/strong&gt; of commands, and decrypting every single one of them over the shell would take a while. There actually is a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;help&lt;/code&gt; shell command as well as the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;udw.cmds&lt;/code&gt; underware command that lists every command there is, but these aren’t enabled when the device is in the SecureBoot mode.
+I was about to reverse the encryption, but I soon found another command &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;udw.iter_get_next&lt;/code&gt;. This command iterates through all underware commands and returns their names. Here’s &lt;a href=&quot;https://gist.github.com/4g3v/e52a3561584b661ec269675b5b931f4e&quot;&gt;a list&lt;/a&gt; of all of them as well as all &lt;a href=&quot;https://gist.github.com/4g3v/887fdf52438cd4dc11dcdc8308fbcb46&quot;&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;pie&lt;/code&gt; underware&lt;/a&gt; commands.&lt;/p&gt;
+
+&lt;p&gt;I started digging to find useful commands and eventually came across &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;photo_hw.read&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;photo_hw.write&lt;/code&gt;. 
+These commands straight up allow you to read/write 1/2/4 bytes from/to any memory address, albeit as a signed integer so you have to do some conversion.&lt;/p&gt;
+
+&lt;p&gt;I suspect that this is an oversight because I also found the following &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;mem&lt;/code&gt; commands that are again only added when SecureBoot is disabled.
+&lt;a href=&quot;/assets/images/part2/udw_MemCommands.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part2/udw_MemCommands.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;I’ve &lt;a href=&quot;https://github.com/4g3v/SiriusHacking/tree/master/uart_shell&quot;&gt;created a python script&lt;/a&gt; which wraps some of the shell’s functionality, allowing you to, among other things, read/write arbitrary memory, dump the nand and even execute code.
+The next part of this series explains how I got ROP and code execution using the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;photo_hw.write&lt;/code&gt; command.&lt;/p&gt;</content><author><name>4g3v</name></author><summary type="html">Disclaimer All of the following information is based on my own research and applies to the HP OfficeJet Pro 8715 with the D9L18-80076 REV C WEBER BASE board and weber_base_vr2_pp1_WBP2CN1848AR_nbx_signed firmware revision. This post is not meant as a reverse engineering introduction, it’s meant to help other researchers get a start in hacking this device/other devices running the same OS.</summary></entry><entry><title type="html">Sirius Hacking Part 1 - The Delta Row Compression</title><link href="http://0.0.0.0:4000/printer-part1" rel="alternate" type="text/html" title="Sirius Hacking Part 1 - The Delta Row Compression" /><published>2022-12-06T00:00:00+01:00</published><updated>2022-12-06T00:00:00+01:00</updated><id>http://0.0.0.0:4000/printer-part1</id><content type="html" xml:base="http://0.0.0.0:4000/printer-part1">&lt;h1 id=&quot;foreword&quot;&gt;Foreword&lt;/h1&gt;
 &lt;p&gt;This series of posts describes obstacles and findings while reverse engineering the firmware of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;HP OfficeJet Pro 8710/8715&lt;/code&gt; and is based on research done by &lt;a href=&quot;https://www.jsof-tech.com/&quot;&gt;JSOF&lt;/a&gt;. My goal with this project is to eventually be able to run Doom on the device.&lt;/p&gt;
 
 &lt;h1 id=&quot;unpacking-a-firmware-update&quot;&gt;Unpacking a firmware update&lt;/h1&gt;
 &lt;p&gt;A firmware update of this printer has many different layers and &lt;a href=&quot;https://www.jsof-tech.com/unpacking-hp-firmware-updates-part-1/&quot;&gt;JSOF did a great job explaining all of these layers in detail&lt;/a&gt; so I am not going too in depth. I was able to follow their blog posts and &lt;a href=&quot;https://github.com/4g3v/SiriusHacking/blob/master/unpack-ful.py&quot;&gt;create a script&lt;/a&gt; which turns an update file (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;*.ful&lt;/code&gt;) into a flash image which can then be analyzed. The file I analyzed used a compression mode (in a single plane), also known as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Method 3&lt;/code&gt; or &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Delta Row Compression&lt;/code&gt;. This method was not explained by JSOF though, so I am going to do that in this post.&lt;/p&gt;
 
 &lt;p&gt;The update uses the special &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;FWUPDATE&lt;/code&gt; language which uses PCL commands and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Raster Graphics&lt;/code&gt; for data storage.
-There’s two types of data, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt;.
-&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; are used for black and white pixels, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt; for colored pixels and there’s multiple of these in an update. This structure repeats itself until the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;End Raster&lt;/code&gt; command &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;esc&amp;gt;*rC&lt;/code&gt;.&lt;/p&gt;
+There are two types of data, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt;.
+&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; are used for black and white pixels, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt; for colored pixels, and there are multiple of these in an update. This structure repeats itself until the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;End Raster&lt;/code&gt; command &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;esc&amp;gt;*rC&lt;/code&gt;.&lt;/p&gt;
 
 &lt;p&gt;Since the “pixels” are just bytes of the firmware, I am simply going to refer to them as data.
-For simplicity’s sake I will refer to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt; as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; since they are handled in pretty much the same way in the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;FWUPDATE&lt;/code&gt; language.&lt;/p&gt;
+For simplicity’s sake, I will refer to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Rows&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Planes&lt;/code&gt; as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; since they are handled in pretty much the same way in the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;FWUPDATE&lt;/code&gt; language.&lt;/p&gt;
 
 &lt;p&gt;A &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; is specified by the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Transfer Raster&lt;/code&gt; command which has the following structure:
 &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;esc&amp;gt;*b(Amount of data)(W/V)&lt;/code&gt;.
-This command can also specify the compression by having the type of the compression followed by &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;m&lt;/code&gt; before the amount of data.&lt;/p&gt;
+This command can also specify the compression by having the type of compression followed by &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;m&lt;/code&gt; before the amount of data.&lt;/p&gt;
 
 &lt;table id=&quot;normalTable&quot; class=&quot;dynamicTable&quot;&gt;
   &lt;thead&gt;
@@ -41,13 +273,13 @@ This command can also specify the compression by having the type of the compress
   &lt;/tbody&gt;
 &lt;/table&gt;
 
-&lt;p&gt;If it doesn’t, the compression of the previous &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; will be used. Here’s an example of five &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; color coded by their compression type and their data marked in green:
+&lt;p&gt;If it doesn’t, the compression of the previous &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; will be used. Here’s an example of five &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; color-coded by their compression type and their data marked in green:
 &lt;a href=&quot;/assets/images/part1/rows_example.png&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;/assets/images/part1/rows_example.png&quot; alt=&quot;&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
 
 &lt;h1 id=&quot;delta-row-compression&quot;&gt;Delta Row Compression&lt;/h1&gt;
 &lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Delta Row Compression&lt;/code&gt; basically only saves the differences between &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunks&lt;/code&gt; and applies them.&lt;/p&gt;
 
-&lt;p&gt;The data of a delta row compressed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; consists of a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Command Byte&lt;/code&gt; and one to eight &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Replacement Bytes&lt;/code&gt;. The first five bits of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Command Byte&lt;/code&gt; specify the &lt;strong&gt;offset&lt;/strong&gt; (0-30), the last three bits specify the &lt;strong&gt;number of bytes to replace&lt;/strong&gt; (1-8). 
+&lt;p&gt;The data of a delta row compressed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; consists of a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Command Byte&lt;/code&gt; and one to eight &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Replacement Bytes&lt;/code&gt;. The first five bits of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Command Byte&lt;/code&gt; specify the &lt;strong&gt;offset&lt;/strong&gt; (0-30), and the last three bits specify the &lt;strong&gt;number of bytes to replace&lt;/strong&gt; (1-8). 
 The replacement bytes are applied to the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt; with the respective offset.
 Once &lt;strong&gt;any&lt;/strong&gt; &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Chunk&lt;/code&gt; is processed (&lt;strong&gt;regardless&lt;/strong&gt; of the compression type), it becomes the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/p&gt;
 
@@ -57,7 +289,7 @@ Once &lt;strong&gt;any&lt;/strong&gt; &lt;code class=&quot;language-plaintext hi
 
 &lt;ol&gt;
   &lt;li&gt;Output &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;12&lt;/code&gt; unencoded &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;X&lt;/code&gt;’s as an example &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
-  &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;2&lt;/code&gt; bytes (1 is specified but we have to add 1 everytime since you can only represent 0-7 with three bits) at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0&lt;/code&gt; of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;. This output is now the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
+  &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;2&lt;/code&gt; bytes (1 is specified but we have to add 1 every time since you can only represent 0-7 with three bits) at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0&lt;/code&gt; of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;. This output is now the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
   &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;2&lt;/code&gt; bytes at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;2&lt;/code&gt; of the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;. This too becomes the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
   &lt;li&gt;Replace &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;6&lt;/code&gt; bytes at offset &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;6&lt;/code&gt; of the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;. This too becomes the new &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Seed Row&lt;/code&gt;.&lt;/li&gt;
 &lt;/ol&gt;

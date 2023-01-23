@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en" class="html" data-theme="dark"><head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <title>
+    
+      Sirius Hacking Part 2 - System Internals
+    
+  </title>
+
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<meta name="generator" content="Jekyll v4.2.2" />
+<meta property="og:title" content="Sirius Hacking Part 2 - System Internals" />
+<meta name="author" content="4g3v" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Disclaimer All of the following information is based on my own research and applies to the HP OfficeJet Pro 8715 with the D9L18-80076 REV C WEBER BASE board and weber_base_vr2_pp1_WBP2CN1848AR_nbx_signed firmware revision. This post is not meant as a reverse engineering introduction, it’s meant to help other researchers get a start in hacking this device/other devices running the same OS." />
+<meta property="og:description" content="Disclaimer All of the following information is based on my own research and applies to the HP OfficeJet Pro 8715 with the D9L18-80076 REV C WEBER BASE board and weber_base_vr2_pp1_WBP2CN1848AR_nbx_signed firmware revision. This post is not meant as a reverse engineering introduction, it’s meant to help other researchers get a start in hacking this device/other devices running the same OS." />
+<link rel="canonical" href="http://0.0.0.0:4000/printer-part2" />
+<meta property="og:url" content="http://0.0.0.0:4000/printer-part2" />
+<meta property="og:site_name" content="vegamay.li" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2023-01-09T00:00:00+01:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Sirius Hacking Part 2 - System Internals" />
+<meta name="twitter:site" content="@4g3v_" />
+<meta name="twitter:creator" content="@4g3v" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"4g3v"},"dateModified":"2023-01-09T00:00:00+01:00","datePublished":"2023-01-09T00:00:00+01:00","description":"Disclaimer All of the following information is based on my own research and applies to the HP OfficeJet Pro 8715 with the D9L18-80076 REV C WEBER BASE board and weber_base_vr2_pp1_WBP2CN1848AR_nbx_signed firmware revision. This post is not meant as a reverse engineering introduction, it’s meant to help other researchers get a start in hacking this device/other devices running the same OS.","headline":"Sirius Hacking Part 2 - System Internals","mainEntityOfPage":{"@type":"WebPage","@id":"http://0.0.0.0:4000/printer-part2"},"url":"http://0.0.0.0:4000/printer-part2"}</script>
+<!-- End Jekyll SEO tag -->
+
+  <link type="application/atom+xml" rel="alternate" href="http://0.0.0.0:4000/feed.xml" title="vegamay.li" />
+
+  <!-- Favicon -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/favicon/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/favicon/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/favicon/favicon-16x16.png">
+  <link rel="manifest" href="/assets/images/favicon/site.webmanifest">
+  <link rel="mask-icon" href="/assets/images/favicon/safari-pinned-tab.svg" color="#5bbad5">
+  <link rel="shortcut icon" href="/assets/images/favicon/favicon.ico">
+  <meta name="msapplication-TileColor" content="#00aba9">
+  <meta name="msapplication-config" content="/assets/images/favicon/browserconfig.xml">
+  <meta name="theme-color" content="#ffffff">
+  <!-- Favicon -->
+
+  <link rel="stylesheet" href="/assets/css/main.css" />
+  
+    <script type="text/javascript">
+  window.addEventListener('load', themeChange);
+  const currentTheme = localStorage.getItem('theme') ? localStorage.getItem('theme') : null;
+  if (currentTheme)
+    document.documentElement.setAttribute('data-theme', currentTheme);
+
+  function themeChange() {
+    let button = document.querySelector('.theme-toggle');
+
+    button.addEventListener('click', function (e) {
+      let currentTheme = document.documentElement.getAttribute('data-theme');
+      if (currentTheme === 'dark') {
+        transition();
+        document.documentElement.setAttribute('data-theme', 'light');
+        localStorage.setItem('theme', 'light');
+      } else {
+        transition();
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('theme', 'dark');
+      }
+    });
+
+    let transition = () => {
+      document.documentElement.classList.add('transition');
+      window.setTimeout(() => {
+        document.documentElement.classList.remove('transition');
+      }, 1000);
+    }
+  }
+</script>
+
+
+  
+</head>
+<body>
+    <main class="page-content" aria-label="Content">
+      <div class="w">
+        <a href="/">home..</a>
+<h1 class="post-title">Sirius Hacking Part 2 - System Internals</h1>
+<p class="post-date text-bold">
+  
+  
+    <span class="text-upcase">January 2023</span>
+  
+
+
+  
+  
+  (2205 Words, 
+  13 Minutes)
+  
+
+</p>
+
+<div class="soopr-btn"
+   data-twitter="SooprCo"
+>
+</div>
+
+
+  <div class="">
+    
+  </div>
+
+
+<h1 id="disclaimer">Disclaimer</h1>
+<p>All of the following information is based on my own research and applies to the <code class="language-plaintext highlighter-rouge">HP OfficeJet Pro 8715</code> with the <code class="language-plaintext highlighter-rouge">D9L18-80076 REV C WEBER BASE</code> board and <code class="language-plaintext highlighter-rouge">weber_base_vr2_pp1_WBP2CN1848AR_nbx_signed</code> firmware revision.
+This post is not meant as a reverse engineering introduction, it’s meant to help other researchers get a start in hacking this device/other devices running the same OS.</p>
+
+<h1 id="the-hardware">The hardware</h1>
+
+<p><a href="/assets/images/part2/ASIC_2.png" target="_blank" class="asic"><img src="/assets/images/part2/ASIC_2.png" alt="" /></a>
+<a href="/assets/images/part2/ASIC.png" target="_blank" class="asic"><img src="/assets/images/part2/ASIC.png" alt="" /></a></p>
+
+<p>There are two cores on the ASIC, one big endian <code class="language-plaintext highlighter-rouge">ARM Cortex-R4</code> core running on 150mhz and one little-endian <a href="https://en.wikipedia.org/wiki/ST200_family">ST231</a> (a processor architecture developed by <code class="language-plaintext highlighter-rouge">HP</code> and <code class="language-plaintext highlighter-rouge">STMicroelectronics</code>) core named <code class="language-plaintext highlighter-rouge">pie</code>.
+These two cores can communicate with each other, though I haven’t figured out the purpose of <code class="language-plaintext highlighter-rouge">pie</code> yet.
+Looking at the output of the <a href="#serial-shell">Serial Shell</a> while the device boots suggests that the name of this specific ASIC is <code class="language-plaintext highlighter-rouge">Bird</code>.</p>
+
+<p>The board also has 128 MB of SLC NAND flash memory (<code class="language-plaintext highlighter-rouge">Macronix MX30LF1GE8AB-TI</code>) as well as 128 MB of DDR3 SDRAM (<code class="language-plaintext highlighter-rouge">Winbond W631GG6KB-15</code>).</p>
+
+<p>The front panel contains a <code class="language-plaintext highlighter-rouge">320x240</code> <code class="language-plaintext highlighter-rouge">GiantPlus</code> LCD screen and a capacitive touchscreen that’s bigger than the screen. This touchscreen is also used to implement the soft buttons.</p>
+
+<p>There’s also a WiFi module called <code class="language-plaintext highlighter-rouge">Ultra_Spectra</code>/<code class="language-plaintext highlighter-rouge">SDGOB-1392</code> which uses a Broadcom <code class="language-plaintext highlighter-rouge">BCM943143EDSBP</code>.
+This module uses <a href="https://www.sdcard.org/developers/sd-standard-overview/sdio-isdio/">SDIO</a> to communicate with the board and its firmware/config resides in the ROM filesystem.</p>
+
+<h1 id="the-operating-systems">The operating systems</h1>
+<p>Both of these cores run <code class="language-plaintext highlighter-rouge">Sirius</code>, a custom OS built on top of another <code class="language-plaintext highlighter-rouge">RTOS</code>.
+The <code class="language-plaintext highlighter-rouge">ST231</code> core runs on <code class="language-plaintext highlighter-rouge">OS21</code>, a <code class="language-plaintext highlighter-rouge">RTOS</code> by <code class="language-plaintext highlighter-rouge">STMicroelectronics</code>.
+The <code class="language-plaintext highlighter-rouge">ARM</code> core runs on <a href="https://en.wikipedia.org/wiki/ThreadX">ThreadX</a> (specifically <code class="language-plaintext highlighter-rouge">ThreadX ARM9/Green Hills Version G5.1.5.0 SN: HP_RC2_INTERNAL_USE_042007</code>), an embedded real-time operating system by <code class="language-plaintext highlighter-rouge">Express Logic</code> which was purchased and open-sourced by Microsoft in 2019. Being able to match the disassembly with the source turned out to be very useful while reverse engineering the firmware.
+The firmware uses <a href="https://treck.com/">Treck</a> as its TCP/IP stack.</p>
+
+<p>I’ve created an <a href="https://github.com/4g3v/SiriusHacking/blob/master/SiriusFlashLoader.py">IDA loader</a> for <code class="language-plaintext highlighter-rouge">Sirius</code> flash images, it sets up all of the segments, decompresses compressed segments, and handles the memcpy segments.</p>
+
+<h1 id="sirius-modules">Sirius Modules</h1>
+<p>While reverse engineering pretty much any functionality, you’ll quickly notice lots of indirect calls. These are likely to be exports of modules.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">.module</code> segment contains an array with pointers to all module entries.
+<a href="/assets/images/part2/module_Segment.png" target="_blank"><img src="/assets/images/part2/module_Segment.png" alt="" /></a></p>
+
+<p><a href="/assets/images/part2/ggw_Module.png" target="_blank"><img src="/assets/images/part2/ggw_Module.png" alt="" /></a>
+<em>(This is the <code class="language-plaintext highlighter-rouge">ggw</code> module definition)</em></p>
+
+<p>Modules can be libraries, components, or a hybrid of both. They can export functions and other modules can import those functions. They have a list of tasks as well as a list of imported and exported events. They also have an ID which is used in the import/export mechanism.
+Each module has an important function in its definition which I’ve called <code class="language-plaintext highlighter-rouge">GetFunctionTable</code>.
+<a href="/assets/images/part2/ggw_GetFunctionTable.png" target="_blank"><img src="/assets/images/part2/ggw_GetFunctionTable.png" alt="" /></a></p>
+
+<p>It returns a pointer to the FunctionTable which in itself contains pointers to functions such as <code class="language-plaintext highlighter-rouge">Init</code>, <code class="language-plaintext highlighter-rouge">Start</code>, <code class="language-plaintext highlighter-rouge">GetExport</code>, <code class="language-plaintext highlighter-rouge">SetImport</code> etc.
+<a href="/assets/images/part2/ggw_FuncTable.png" target="_blank"><img src="/assets/images/part2/ggw_FuncTable.png" alt="" /></a></p>
+
+<p>After ThreadX booted, <code class="language-plaintext highlighter-rouge">Sirius</code> starts to initialize the modules. It does a bunch of error checking, initializes internal structures, and links all of the imports and exports together.
+It then starts the modules by doing the following for each entry:</p>
+<ul>
+  <li>Calling the <code class="language-plaintext highlighter-rouge">Init</code> function</li>
+  <li>Handling imports/exports</li>
+  <li>Creating a thread for each task with a predefined priority and specified stack size. These are started automatically and kept track of in a list.</li>
+  <li>Calling <code class="language-plaintext highlighter-rouge">early_start</code>, <code class="language-plaintext highlighter-rouge">Start</code>, <code class="language-plaintext highlighter-rouge">StartComplete</code>, and <code class="language-plaintext highlighter-rouge">StartComplete2</code></li>
+</ul>
+
+<p>Each import/export has the same structure, they have a type (<code class="language-plaintext highlighter-rouge">VTABLE</code> and <code class="language-plaintext highlighter-rouge">DIRECT</code>), an <code class="language-plaintext highlighter-rouge">IID</code>, which I suppose stands for interface id, as well as an <code class="language-plaintext highlighter-rouge">Enum</code>. Exports additionally always specify a module id whereas imports only specify them if there are multiple exports with the same <code class="language-plaintext highlighter-rouge">IID</code>.</p>
+
+<h1 id="handling-importsexports">Handling imports/exports</h1>
+<p>Let’s resolve the imports of the <code class="language-plaintext highlighter-rouge">ggw</code> module to give you an idea of how it works.
+<a href="/assets/images/part2/ggw_Imports.png" target="_blank"><img src="/assets/images/part2/ggw_Imports.png" alt="" /></a></p>
+
+<p>Searching for the first <code class="language-plaintext highlighter-rouge">IID</code> (<code class="language-plaintext highlighter-rouge">0x10D47</code>), we see that it’s defined in the <code class="language-plaintext highlighter-rouge">ds2</code> module and has an <code class="language-plaintext highlighter-rouge">Enum</code> value of <code class="language-plaintext highlighter-rouge">0x1F</code>:
+<a href="/assets/images/part2/ds2_Module.png" target="_blank"><img src="/assets/images/part2/ds2_Module.png" alt="" /></a></p>
+
+<p><code class="language-plaintext highlighter-rouge">Sirius</code> first calls the <code class="language-plaintext highlighter-rouge">GetExport</code> function of the module that exports this <code class="language-plaintext highlighter-rouge">IID</code> (in this case <code class="language-plaintext highlighter-rouge">ds2_GetExport</code>), providing the <code class="language-plaintext highlighter-rouge">Enum</code> of the export definition.
+<a href="/assets/images/part2/ds2_GetExport.png" target="_blank"><img src="/assets/images/part2/ds2_GetExport.png" alt="" /></a></p>
+
+<p>This function subtracts <code class="language-plaintext highlighter-rouge">0x1F</code> from the passed <code class="language-plaintext highlighter-rouge">Enum</code> value and returns the element located at that index from the <code class="language-plaintext highlighter-rouge">ds2_ExportTable</code> array. Since the export’s <code class="language-plaintext highlighter-rouge">Enum</code>, we are interested in is <code class="language-plaintext highlighter-rouge">0x1F</code>, the function just returns the first element of the ExportTable.</p>
+
+<p><code class="language-plaintext highlighter-rouge">Sirius</code> then calls the <code class="language-plaintext highlighter-rouge">SetImport</code> function of the module that imports this <code class="language-plaintext highlighter-rouge">IID</code> (in this case <code class="language-plaintext highlighter-rouge">ggw_SetImport</code>), providing the enum of the import (<code class="language-plaintext highlighter-rouge">0xD8</code>) as well as the returned element of the ExportTable.
+<a href="/assets/images/part2/ggw_SetImport.png" target="_blank"><img src="/assets/images/part2/ggw_SetImport.png" alt="" /></a></p>
+
+<p>This function works similarly to the <code class="language-plaintext highlighter-rouge">GetExport</code> functions, except that it stores the passed element to the index (the passed <code class="language-plaintext highlighter-rouge">Enum</code> minus <code class="language-plaintext highlighter-rouge">0xD7</code>) in the <code class="language-plaintext highlighter-rouge">ggw_ImportTable</code>.</p>
+
+<p>Here’s some pseudocode illustrating the process:</p>
+<div class="language-c code highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="o">*</span><span class="nf">ds2_GetExport</span><span class="p">(</span><span class="kt">int</span> <span class="n">exportEnum</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">return</span> <span class="n">ds2_ExportTable</span><span class="p">[</span><span class="n">exportEnum</span> <span class="o">-</span> <span class="mh">0x1F</span><span class="p">];</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="nf">ggw_SetImport</span><span class="p">(</span><span class="kt">int</span> <span class="n">importEnum</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">value</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">ggw_ImportTable</span><span class="p">[</span><span class="n">importEnum</span> <span class="o">-</span> <span class="mh">0xD7</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="o">*</span><span class="n">val</span> <span class="o">=</span> <span class="n">ds2_GetExport</span><span class="p">(</span><span class="mh">0x1F</span><span class="p">);</span>
+<span class="n">ggw_SetImport</span><span class="p">(</span><span class="mh">0xD8</span><span class="p">,</span> <span class="n">val</span><span class="p">);</span>
+</code></pre></div></div>
+
+<p>Even though this is the <strong>first</strong> import definition, it’s the <strong>second</strong> import in the ImportTable since <code class="language-plaintext highlighter-rouge">0xD8</code>-<code class="language-plaintext highlighter-rouge">0xD7</code> equals <code class="language-plaintext highlighter-rouge">1</code>.</p>
+
+<p>We can repeat this logic for the remaining entries and create a structure in IDA to then set the type of the <code class="language-plaintext highlighter-rouge">ggw_ImportTable</code> to that structure.</p>
+
+<table style="max-width: 440px" class="dynamicTable">
+  <thead>
+    <tr>
+      <th>ImportTable index</th>
+      <th>Enum</th>
+      <th>IID</th>
+      <th>Exported in module</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>0</td>
+      <td><code class="language-plaintext highlighter-rouge">0xD7</code></td>
+      <td><code class="language-plaintext highlighter-rouge">0x10E84</code></td>
+      <td><code class="language-plaintext highlighter-rouge">conn_mgr</code></td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td><code class="language-plaintext highlighter-rouge">0xD8</code></td>
+      <td><code class="language-plaintext highlighter-rouge">0x10D47</code></td>
+      <td><code class="language-plaintext highlighter-rouge">ds2</code></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><code class="language-plaintext highlighter-rouge">0xD9</code></td>
+      <td><code class="language-plaintext highlighter-rouge">0x10DA0</code></td>
+      <td><code class="language-plaintext highlighter-rouge">nca</code></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><code class="language-plaintext highlighter-rouge">0xDA</code></td>
+      <td><code class="language-plaintext highlighter-rouge">0x10E5A</code></td>
+      <td><code class="language-plaintext highlighter-rouge">COMP_IO_SOCKET_MGR</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p><a href="/assets/images/part2/ggw_ImportTableStruct.png" target="_blank"><img src="/assets/images/part2/ggw_ImportTableStruct.png" alt="" class="zeroMargin" /></a></p>
+
+<p>Turning this:
+<a href="/assets/images/part2/ggw_ImportTableBefore.png" target="_blank"><img src="/assets/images/part2/ggw_ImportTableBefore.png" alt="" class="zeroMargin" /></a>
+Into this:
+<a href="/assets/images/part2/ggw_ImportTableAfter.png" target="_blank"><img src="/assets/images/part2/ggw_ImportTableAfter.png" alt="" class="zeroMargin" /></a></p>
+
+<p>We still don’t know what functions are being called though.
+To understand this, we have to know what the ExportTables contain.
+<a href="/assets/images/part2/conn_mgr_ExportTable.gif" target="_blank"><img src="/assets/images/part2/conn_mgr_ExportTable.gif" alt="" class="zeroMargin" /></a></p>
+
+<p>As you can see, it’s pointers that point to pointers of a bunch of other function pointers.
+We can now create another struct in IDA representing these function pointers and set all of the fields to <code class="language-plaintext highlighter-rouge">void*</code>:
+<a href="/assets/images/part2/conn_mgr_ExportTableEntryStruct.png" target="_blank"><img src="/assets/images/part2/conn_mgr_ExportTableEntryStruct.png" alt="" class="zeroMargin" /></a></p>
+
+<p>Now we apply this structure:
+<a href="/assets/images/part2/conn_mgr_ExportTableStruct.gif" target="_blank"><img src="/assets/images/part2/conn_mgr_ExportTableStruct.gif" alt="" class="zeroMargin" /></a></p>
+
+<p>Of course, we still have to reverse these functions and give them, as well as the fields in the struct, proper names.</p>
+
+<p>To get some nice decompiler output, we set the type of <code class="language-plaintext highlighter-rouge">conn_mgr_10E84</code> in the <code class="language-plaintext highlighter-rouge">ggw_ImportTableStruct</code> to a pointer to a pointer of the created struct:
+<a href="/assets/images/part2/ggw_ImportTableStructConnMgrType.png" target="_blank"><img src="/assets/images/part2/ggw_ImportTableStructConnMgrType.png" alt="" /></a>
+This turns the decompiler output from earlier to this:
+<a href="/assets/images/part2/ggw_ImportTableAfterConnMgrStruct.png" target="_blank"><img src="/assets/images/part2/ggw_ImportTableAfterConnMgrStruct.png" alt="" /></a></p>
+
+<p>All modules I’ve looked at work in the same way, the only difference being the number that’s subtracted from the <code class="language-plaintext highlighter-rouge">Enum</code> in the <code class="language-plaintext highlighter-rouge">GetExport</code> / <code class="language-plaintext highlighter-rouge">SetImport</code> functions.
+However, this logic does not apply to imports/exports with the <code class="language-plaintext highlighter-rouge">DIRECT</code> type. I haven’t looked much into them, but I suppose that these are just statically linked.</p>
+
+<p>To make this task easier, I’ve created an <a href="https://github.com/4g3v/SiriusHacking/blob/master/SiriusModuleTool.py">IDA script</a> that defines all of the modules. It labels everything, creates functions for the tasks, and declares the module’s FunctionTable functions. You still have to resolve the imports yourself though.</p>
+
+<h1 id="serial-shell">Serial Shell</h1>
+<p>While taking a look at the board of the printer, I noticed two Serial headers (labeled <code class="language-plaintext highlighter-rouge">SERIAL0</code> and <code class="language-plaintext highlighter-rouge">SERIAL1</code>) consisting of four pads. This is an indication of UART.
+Lots of embedded devices have some sort of UART shell, oftentimes they are disabled or only provide limited functionality though. 
+Using a multimeter to take a look at the voltage and the continuity test to find the ground pad, I was able to figure out the following pinout:
+<a href="/assets/images/part2/UART_Pinout.jpg" target="_blank"><img src="/assets/images/part2/UART_Pinout.jpg" alt="" /></a>
+<em>Note that I’m not responsible for any damages if this pinout doesn’t match your board revision.</em></p>
+
+<p>I then soldered a total of five breadboard wires with female headers to the two <code class="language-plaintext highlighter-rouge">TX</code> pads, the two <code class="language-plaintext highlighter-rouge">RX</code> pads, and one to any of the two <code class="language-plaintext highlighter-rouge">GND</code> pads (since it’s the same ground plane anyway).</p>
+
+<p>I connected the wires to a USB-to-UART bridge like this:</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">RX</code> on the board to <code class="language-plaintext highlighter-rouge">TX</code> on the bridge</li>
+  <li><code class="language-plaintext highlighter-rouge">TX</code> on the board to <code class="language-plaintext highlighter-rouge">RX</code> on the bridge</li>
+  <li><code class="language-plaintext highlighter-rouge">GND</code> to <code class="language-plaintext highlighter-rouge">GND</code></li>
+</ul>
+
+<p>Afterward, I was expecting lots of trial and error trying to figure out the baud rate, but to my surprise the first baud rate I tried worked!</p>
+
+<p>I was greeted by the following after setting it to <code class="language-plaintext highlighter-rouge">115200</code> and turning on the printer:
+<a href="/assets/images/part2/UART_Bootlog.png" target="_blank"><img src="/assets/images/part2/UART_Bootlog.png" alt="" /></a></p>
+
+<p>Trying undefined commands yields <code class="language-plaintext highlighter-rouge">error: I don't understand</code>. By searching for that string in the firmware, I quickly identified the function responsible for adding commands and thus I found all commands.
+<a href="/assets/images/part2/UART_Example.png" target="_blank"><img src="/assets/images/part2/UART_Example.png" alt="" /></a>
+<em>Running some commands</em></p>
+
+<p>Unfortunately, there aren’t many commands, and those that exist don’t seem too useful.
+There are commands to display and modify memory and even call arbitrary functions. These aren’t added though when the printer is in the “<code class="language-plaintext highlighter-rouge">SecureBoot</code>” mode:
+<a href="/assets/images/part2/mem_ShellCommands.png" target="_blank"><img src="/assets/images/part2/mem_ShellCommands.png" alt="" /></a>
+<em>Note that even though these commands mention <code class="language-plaintext highlighter-rouge">vxWorks</code>, another <code class="language-plaintext highlighter-rouge">RTOS</code>, I didn’t find any other indication of it</em></p>
+
+<p>I’ve named it this way because the code calls a function and only adds these commands if it returns false. This function is also called in a bunch of other places, one function of them is responsible for parsing srecords and calls this <code class="language-plaintext highlighter-rouge">IsSecureBoot</code> function like so:
+<a href="/assets/images/part2/IsSecureBoot.png" target="_blank"><img src="/assets/images/part2/IsSecureBoot.png" alt="" /></a></p>
+
+<p>What’s great about this shell is that it also returns crashdumps, returning the type of crash, the content of all registers, and a stack dump:
+<a href="/assets/images/part2/UART_Crashdump.gif" target="_blank"><img src="/assets/images/part2/UART_Crashdump.gif" alt="" /></a></p>
+
+<p>Looking at the code some more, I kept seeing references to a lot more commands.
+<a href="/assets/images/part2/udw_UsageStrings.png" target="_blank"><img src="/assets/images/part2/udw_UsageStrings.png" alt="" /></a></p>
+
+<p>Trying to run them as is, returned the <code class="language-plaintext highlighter-rouge">error: I don't understand</code> error again though.
+It turns out that these are so-called <code class="language-plaintext highlighter-rouge">Underware</code>/<code class="language-plaintext highlighter-rouge">udw</code> commands.</p>
+
+<h1 id="underware">Underware</h1>
+<p>I have never heard this term before and at the time ChatGPT was just released, so I asked for a definition:
+<a href="/assets/images/part2/udw_ChatGPT.jpg" target="_blank"><img src="/assets/images/part2/udw_ChatGPT.jpg" alt="" /></a></p>
+
+<p>This is quite fitting, it’s basically all of the software that turns this device into a printer and not just some generic device.</p>
+
+<p>I found a <code class="language-plaintext highlighter-rouge">system</code> like function that invokes these commands.
+<a href="/assets/images/part2/udw_system.png" target="_blank"><img src="/assets/images/part2/udw_system.png" alt="" /></a></p>
+
+<p>Since I was getting errors when trying to invoke these commands over the shell, I thought that they were “internal” to the system.
+However, I kept digging and soon found the <code class="language-plaintext highlighter-rouge">udws</code> and <code class="language-plaintext highlighter-rouge">udws_rpc</code> shell commands.
+These allow you to specify some command and optional arguments to that command.
+<code class="language-plaintext highlighter-rouge">udws_rpc</code> runs underware commands on the <code class="language-plaintext highlighter-rouge">pie</code> core (Remember, it also runs <code class="language-plaintext highlighter-rouge">Sirius</code>).
+<a href="/assets/images/part2/udws_Example.png" target="_blank"><img src="/assets/images/part2/udws_Example.png" alt="" /></a>
+<em>Running some example commands, nice easter egg btw</em></p>
+
+<p>I was trying to find all of the command definitions to figure out what sort of functionality was exposed, but I kept seeing weird strings next to normal commands:
+<a href="/assets/images/part2/udw_EncryptedCommands.png" target="_blank"><img src="/assets/images/part2/udw_EncryptedCommands.png" alt="" /></a></p>
+
+<p>It turns out that the developers decided to hide some commands by encrypting them.
+Luckily, there are commands to decrypt/encrypt commands, named <code class="language-plaintext highlighter-rouge">udw.decr</code> and <code class="language-plaintext highlighter-rouge">udw.encr</code> respectively.</p>
+
+<p>There are a <strong>lot</strong> of commands, and decrypting every single one of them over the shell would take a while. There actually is a <code class="language-plaintext highlighter-rouge">help</code> shell command as well as the <code class="language-plaintext highlighter-rouge">udw.cmds</code> underware command that lists every command there is, but these aren’t enabled when the device is in the SecureBoot mode.
+I was about to reverse the encryption, but I soon found another command <code class="language-plaintext highlighter-rouge">udw.iter_get_next</code>. This command iterates through all underware commands and returns their names. Here’s <a href="https://gist.github.com/4g3v/e52a3561584b661ec269675b5b931f4e">a list</a> of all of them as well as all <a href="https://gist.github.com/4g3v/887fdf52438cd4dc11dcdc8308fbcb46"><code class="language-plaintext highlighter-rouge">pie</code> underware</a> commands.</p>
+
+<p>I started digging to find useful commands and eventually came across <code class="language-plaintext highlighter-rouge">photo_hw.read</code> and <code class="language-plaintext highlighter-rouge">photo_hw.write</code>. 
+These commands straight up allow you to read/write 1/2/4 bytes from/to any memory address, albeit as a signed integer so you have to do some conversion.</p>
+
+<p>I suspect that this is an oversight because I also found the following <code class="language-plaintext highlighter-rouge">mem</code> commands that are again only added when SecureBoot is disabled.
+<a href="/assets/images/part2/udw_MemCommands.png" target="_blank"><img src="/assets/images/part2/udw_MemCommands.png" alt="" /></a></p>
+
+<p>I’ve <a href="https://github.com/4g3v/SiriusHacking/tree/master/uart_shell">created a python script</a> which wraps some of the shell’s functionality, allowing you to, among other things, read/write arbitrary memory, dump the nand and even execute code.
+The next part of this series explains how I got ROP and code execution using the <code class="language-plaintext highlighter-rouge">photo_hw.write</code> command.</p>
+
+
+        
+          <button title="Toggle Theme" class="theme-toggle">
+  <svg viewBox="0 0 32 32" width="24" height="24" fill="currentcolor">
+    <circle cx="16" cy="16" r="14" fill="none" stroke="currentcolor" stroke-width="4"></circle>
+    <path d="
+             M 16 0
+             A 16 16 0 0 0 16 32
+             z">
+    </path>
+  </svg>
+</button>
+
+        
+        <div class="credits">&copy;&nbsp;2023&nbsp;4g3v
+          •&nbsp;Theme <a href="https://github.com/abhinavs/moonwalk" target="_blank" rel="noreferrer">Moonwalk</a>
+        </div>
+      </div>
+    </main></body>
+</html>
